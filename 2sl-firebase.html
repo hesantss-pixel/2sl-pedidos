@@ -245,10 +245,14 @@ textarea{resize:none;line-height:1.7;font-size:14px;}
       <div class="login-sub">Sistema de Separação</div>
     </div>
     <div class="login-field">
-      <span class="login-lbl">Senha de Acesso</span>
-      <input type="password" class="login-input" id="login-input" placeholder="Digite a senha..." autocomplete="off">
+      <label class="login-lbl" for="login-email">E-mail</label>
+      <input type="email" class="login-input" id="login-email" placeholder="o mesmo do sistema de rotas" autocomplete="username" inputmode="email">
     </div>
-    <div class="login-err" id="login-err">Senha incorreta. Tente novamente.</div>
+    <div class="login-field">
+      <label class="login-lbl" for="login-input">Senha</label>
+      <input type="password" class="login-input" id="login-input" placeholder="Digite a senha..." autocomplete="current-password">
+    </div>
+    <div class="login-err" id="login-err" role="alert">E-mail ou senha incorretos.</div>
     <button class="btn-login" onclick="fazerLogin()">Entrar</button>
   </div>
 </div>
@@ -431,6 +435,7 @@ textarea{resize:none;line-height:1.7;font-size:14px;}
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getDatabase, ref, set, remove, onValue, get } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyB5r3CJSf0N_bepvFDkyYVPZ9oC3tPt2w8",
@@ -442,10 +447,11 @@ const firebaseConfig = {
   appId: "1:551825837735:web:35b90c1fbdff468f8dd582"
 };
 
-const SENHA = "2sl2024";
-
+// Login pelo Firebase (as mesmas contas liberadas do sistema de rotas ROTAV3).
+// As regras do banco só deixam ler e gravar `pedidos` quem está liberado em acesso/<uid>.
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
+const auth = getAuth(app);
 const dbRef = ref(db, 'pedidos');
 
 const LETRAS = ['A','B','C','D','E','F','G','H','I','J','K','L','M'];
@@ -455,30 +461,45 @@ let searchNF = null, bulkFoundNFs = [];
 let confirmFn = null;
 
 /* ── LOGIN ── */
-function fazerLogin(){
-  const val = document.getElementById('login-input').value;
+function mostrarErroLogin(txt){
   const err = document.getElementById('login-err');
-  if(val === SENHA){
-    err.style.display = 'none';
-    sessionStorage.setItem('2sl_auth','1');
-    mostrarHome();
-  } else {
-    err.style.display = 'block';
+  err.textContent = txt;
+  err.style.display = 'block';
+}
+async function fazerLogin(){
+  const email = document.getElementById('login-email').value.trim();
+  const senha = document.getElementById('login-input').value;
+  if(!email || !senha){ mostrarErroLogin('Preencha o e-mail e a senha.'); return; }
+  document.getElementById('login-err').style.display = 'none';
+  try{
+    await signInWithEmailAndPassword(auth, email, senha);   // onAuthStateChanged abre a tela
+  }catch(e){
+    const c = e && e.code || '';
+    mostrarErroLogin(c === 'auth/too-many-requests' ? 'Muitas tentativas. Espere alguns minutos e tente de novo.'
+      : c === 'auth/network-request-failed' ? 'Sem internet. Confira a conexão e tente de novo.'
+      : 'E-mail ou senha incorretos.');
     document.getElementById('login-input').value = '';
   }
 }
 window.fazerLogin = fazerLogin;
 
-document.getElementById('login-input').addEventListener('keydown', e => {
+['login-email','login-input'].forEach(id => document.getElementById(id).addEventListener('keydown', e => {
   if(e.key === 'Enter') fazerLogin();
-});
+}));
 
-function sair(){
-  sessionStorage.removeItem('2sl_auth');
-  document.getElementById('view-home').style.display = 'none';
-  document.getElementById('view-login').style.display = 'flex';
+let pararLeitura = null;
+async function sair(){
+  if(pararLeitura){ pararLeitura(); pararLeitura = null; }
+  await signOut(auth).catch(() => {});
 }
 window.sair = sair;
+
+onAuthStateChanged(auth, user => {
+  if(user){ mostrarHome(); return; }
+  if(pararLeitura){ pararLeitura(); pararLeitura = null; }
+  document.getElementById('view-home').style.display = 'none';
+  document.getElementById('view-login').style.display = 'flex';
+});
 
 /* ── INIT ── */
 function mostrarHome(){
@@ -488,9 +509,6 @@ function mostrarHome(){
   conectarFirebase();
 }
 
-if(sessionStorage.getItem('2sl_auth') === '1'){
-  mostrarHome();
-}
 
 function inicializarSelects(){
   const ids = ['sel-rua','qa-rua','troca-rua'];
@@ -518,13 +536,15 @@ function inicializarSelects(){
 /* ── FIREBASE ── */
 function conectarFirebase(){
   document.getElementById('loading').classList.add('show');
-  onValue(dbRef, (snapshot) => {
+  if(pararLeitura) pararLeitura();
+  pararLeitura = onValue(dbRef, (snapshot) => {
     dadosLocais = snapshot.val() || {};
     document.getElementById('loading').classList.remove('show');
     refreshUI();
   }, (err) => {
     document.getElementById('loading').classList.remove('show');
-    toast('Erro de conexão','err');
+    const negado = err && /permission/i.test(String(err.code || err.message));
+    toast(negado ? 'Seu usuário não está liberado para os pedidos. Fale com o administrador.' : 'Erro de conexão','err');
   });
 }
 
