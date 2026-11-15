@@ -245,14 +245,10 @@ textarea{resize:none;line-height:1.7;font-size:14px;}
       <div class="login-sub">Sistema de Separação</div>
     </div>
     <div class="login-field">
-      <label class="login-lbl" for="login-email">E-mail</label>
-      <input type="email" class="login-input" id="login-email" placeholder="o mesmo do sistema de rotas" autocomplete="username" inputmode="email">
-    </div>
-    <div class="login-field">
-      <label class="login-lbl" for="login-input">Senha</label>
+      <label class="login-lbl" for="login-input">Senha de acesso</label>
       <input type="password" class="login-input" id="login-input" placeholder="Digite a senha..." autocomplete="current-password">
     </div>
-    <div class="login-err" id="login-err" role="alert">E-mail ou senha incorretos.</div>
+    <div class="login-err" id="login-err" role="alert">Senha incorreta.</div>
     <button class="btn-login" onclick="fazerLogin()">Entrar</button>
   </div>
 </div>
@@ -447,9 +443,13 @@ const firebaseConfig = {
   appId: "1:551825837735:web:35b90c1fbdff468f8dd582"
 };
 
-// Login pelo Firebase (as mesmas contas liberadas do sistema de rotas ROTAV3).
-// As regras do banco só deixam ler e gravar `pedidos` quem está liberado em acesso/<uid>.
-const app = initializeApp(firebaseConfig);
+// Entrada só com a senha: por trás, é o login do Firebase numa conta própria da separação.
+// A senha não fica escrita nesta página (o Firebase confere no servidor), e as regras do
+// banco só deixam ler e gravar `pedidos` essa conta (separacao/<uid> = true) e a operação
+// principal. App com nome próprio: o login daqui não mistura com o do sistema de rotas,
+// que fica no mesmo site.
+const CONTA_SEPARACAO = "separacao@slog-pedidos.firebaseapp.com";
+const app = initializeApp(firebaseConfig, "separacao");
 const db = getDatabase(app);
 const auth = getAuth(app);
 const dbRef = ref(db, 'pedidos');
@@ -467,38 +467,42 @@ function mostrarErroLogin(txt){
   err.style.display = 'block';
 }
 async function fazerLogin(){
-  const email = document.getElementById('login-email').value.trim();
   const senha = document.getElementById('login-input').value;
-  if(!email || !senha){ mostrarErroLogin('Preencha o e-mail e a senha.'); return; }
+  if(!senha){ mostrarErroLogin('Digite a senha.'); return; }
   document.getElementById('login-err').style.display = 'none';
   try{
-    await signInWithEmailAndPassword(auth, email, senha);   // onAuthStateChanged abre a tela
+    await signInWithEmailAndPassword(auth, CONTA_SEPARACAO, senha);   // onAuthStateChanged abre a tela
   }catch(e){
     const c = e && e.code || '';
     mostrarErroLogin(c === 'auth/too-many-requests' ? 'Muitas tentativas. Espere alguns minutos e tente de novo.'
       : c === 'auth/network-request-failed' ? 'Sem internet. Confira a conexão e tente de novo.'
-      : 'E-mail ou senha incorretos.');
+      : 'Senha incorreta.');
     document.getElementById('login-input').value = '';
   }
 }
 window.fazerLogin = fazerLogin;
 
-['login-email','login-input'].forEach(id => document.getElementById(id).addEventListener('keydown', e => {
+document.getElementById('login-input').addEventListener('keydown', e => {
   if(e.key === 'Enter') fazerLogin();
-}));
+});
+
+function mostrarLogin(){
+  document.getElementById('view-home').style.display = 'none';
+  document.getElementById('view-login').style.display = 'flex';
+}
 
 let pararLeitura = null;
 async function sair(){
   if(pararLeitura){ pararLeitura(); pararLeitura = null; }
   await signOut(auth).catch(() => {});
+  mostrarLogin();
 }
 window.sair = sair;
 
 onAuthStateChanged(auth, user => {
   if(user){ mostrarHome(); return; }
   if(pararLeitura){ pararLeitura(); pararLeitura = null; }
-  document.getElementById('view-home').style.display = 'none';
-  document.getElementById('view-login').style.display = 'flex';
+  mostrarLogin();
 });
 
 /* ── INIT ── */
@@ -544,7 +548,7 @@ function conectarFirebase(){
   }, (err) => {
     document.getElementById('loading').classList.remove('show');
     const negado = err && /permission/i.test(String(err.code || err.message));
-    toast(negado ? 'Seu usuário não está liberado para os pedidos. Fale com o administrador.' : 'Erro de conexão','err');
+    toast(negado ? 'Esta conta ainda não está liberada para os pedidos (separacao no banco).' : 'Erro de conexão','err');
   });
 }
 
